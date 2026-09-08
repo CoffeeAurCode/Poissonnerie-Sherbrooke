@@ -2,11 +2,8 @@
 /**
  * Seed the eight counters and the catalog that sits on them.
  *
- * ⚠ THIS IS PLACEHOLDER CATALOG DATA. The category taxonomy is real: it is
- * read off the shop's own landing page, which already names these eight
- * counters. The PRODUCTS AND PRICES ARE INVENTED, plausibly, so the prototype
- * has something to demonstrate. They must be replaced with the shop's real
- * catalog before anyone trades on this.
+ * The products and prices are the shop's current catalog. The existing
+ * paintings remain temporary until the shop supplies exact product photos.
  *
  * ⭐ EVERY `image_path` HERE POINTS AT `/painted/`, WHICH IS PAINTING AND NOT
  * PHOTOGRAPHY, and the directory is named that way so the distinction is
@@ -28,17 +25,9 @@
  * mackerel all showed the SAME picture of a counter. That is the
  * misrepresentation §6 is actually about, and it was already shipping.
  *
- * Why invented rather than minimal: the interesting behaviour in this system
- * only shows up with a catalog that exercises it. This one deliberately spans
- * BOTH pricing modes and ALL FOUR handling classes, so that the hot-food slot
- * rule, the per-kg estimate, the pack fixed price and the weighing screen all
- * have something to act on. Eight one-line fixtures would demonstrate none of
- * that and would make the storefront look empty at 2 columns on a phone.
- *
  * Idempotent: every insert is an upsert keyed on the slug, so running it twice
- * updates rather than duplicates. It does NOT delete products that have been
- * removed from this file, because deleting a product that an order references
- * should fail loudly rather than cascade.
+ * updates rather than duplicates. Superseded seeded products are retired, not
+ * deleted, so historical order lines and any reservations remain intact.
  *
  * Usage:
  *   DIRECT_DATABASE_URL=postgres://... node scripts/seed-catalog.mjs
@@ -46,6 +35,7 @@
 
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { CURRENT_PRODUCTS } from './catalog-data.mjs';
 
 try {
   process.loadEnvFile('.env.local');
@@ -159,7 +149,7 @@ const STD = 'STANDARD';
 const kg = (rate, min = 250, step = 250) => ({ mode: 'perKg', rate, min, step });
 const pack = (price, wMin, wMax) => ({ mode: 'pack', price, wMin, wMax });
 
-const PRODUCTS = [
+const PREVIOUS_PRODUCTS = [
   // ── Fresh fish ───────────────────────────────────────────────────────────
   ['fresh-fish', 'atlantic-cod-fillet', 'Atlantic cod fillet', "Filet de morue de l'Atlantique",
     'Thick, flaking white fillets. Skin off, pin boned.', 'Filets blancs épais et floconneux. Sans peau, désarêtés.',
@@ -292,11 +282,10 @@ const PRODUCTS = [
 const PREPS = {
   'atlantic-cod-fillet': [['Whole piece', 'Pièce entière'], ['Cut into portions', 'Coupé en portions']],
   'atlantic-salmon-fillet': [['Whole side', 'Filet entier'], ['Cut into portions', 'Coupé en portions'], ['Skin removed', 'Sans peau']],
-  'whole-sea-bass': [['Whole', 'Entier'], ['Filleted', 'En filets'], ['Butterflied', 'En crapaudine']],
-  'rainbow-trout': [['Whole', 'Entier'], ['Filleted', 'En filets']],
   'yellowfin-tuna-loin': [['Whole piece', 'Pièce entière'], ['Cut into steaks', 'Coupée en darnes']],
-  'live-lobster': [['Live', 'Vivant'], ['Cooked before delivery', 'Cuit avant la livraison']],
 };
+
+const currentCategorySlugs = [...new Set(CURRENT_PRODUCTS.map(([categorySlug]) => categorySlug))];
 
 const client = new pg.Client({ connectionString: url, ssl: tls(url) });
 await client.connect();
@@ -317,7 +306,7 @@ try {
     );
   }
 
-  for (const [catSlug, slug, nameEn, nameFr, descEn, descFr, handling, taxCode, pricing, image] of PRODUCTS) {
+  for (const [catSlug, slug, nameEn, nameFr, descEn, descFr, handling, taxCode, pricing, image] of CURRENT_PRODUCTS) {
     const p = pricing.mode === 'pack'
       ? { packPrice: pricing.price, wMin: pricing.wMin, wMax: pricing.wMax, rate: null, min: null, step: null }
       : { packPrice: null, wMin: null, wMax: null, rate: pricing.rate, min: pricing.min, step: pricing.step };
@@ -346,6 +335,29 @@ try {
        p.packPrice, p.wMin, p.wMax, p.rate, p.min, p.step, taxCode],
     );
   }
+
+  const currentProductSlugs = CURRENT_PRODUCTS.map(([, slug]) => slug);
+  const previousProductSlugs = PREVIOUS_PRODUCTS.map(([, slug]) => slug);
+  await client.query(
+    `UPDATE product
+        SET active = false, updated_at = now()
+      WHERE active = true
+        AND slug = ANY($1::text[])
+        AND NOT (slug = ANY($2::text[]))`,
+    [previousProductSlugs, currentProductSlugs],
+  );
+
+  const seededCategorySlugs = CATEGORIES.map(({ slug }) => slug);
+  await client.query(
+    `UPDATE category AS c
+        SET active = EXISTS (
+              SELECT 1 FROM product AS p
+               WHERE p.category_id = c.id AND p.active = true
+            ),
+            updated_at = now()
+      WHERE c.slug = ANY($1::text[])`,
+    [seededCategorySlugs],
+  );
 
   for (const [slug, options] of Object.entries(PREPS)) {
     // Replaced wholesale rather than upserted: prep options have no natural
@@ -379,4 +391,4 @@ try {
   await client.end();
 }
 
-console.log(`Seeded ${CATEGORIES.length} categories and ${PRODUCTS.length} products.`);
+console.log(`Seeded ${currentCategorySlugs.length} active categories and ${CURRENT_PRODUCTS.length} current products.`);
