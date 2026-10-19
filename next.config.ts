@@ -13,9 +13,12 @@ const nextConfig: NextConfig = {
     taint: true,
   },
 
-  // Produces a minimal self-contained server bundle. Matters on a 512 MB /
-  // 0.5 vCPU instance, where shipping node_modules to the runtime is waste.
-  output: 'standalone',
+  // A minimal self-contained server bundle, for running `next start` on a box
+  // of our own. Vercel packages functions itself and does not want it, so it
+  // is off there. CI (no VERCEL variable) still builds it, which is what the
+  // secret scan's `.next/standalone` directory expects.
+  // A spread, not `output: undefined` — exactOptionalPropertyTypes rejects that.
+  ...(process.env.VERCEL ? {} : { output: 'standalone' as const }),
 
   // Supabase's Postgres root CA, read at runtime by src/db/ssl.ts.
   //

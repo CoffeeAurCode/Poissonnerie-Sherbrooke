@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["yul1"],
+  "git": {
+    "deploymentEnabled": false
+  }
+}

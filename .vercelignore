@@ -1,0 +1,13 @@
+# What `vercel deploy` must never upload. Secrets above all: the CLI uploads
+# the working directory, and a developer's checkout has a real .env.local.
+.env
+.env.*
+!.env.example
+.vercel
+.next
+node_modules
+coverage
+parity/current
+*.dump
+*.sql.gz
+dumps/

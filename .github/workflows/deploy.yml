@@ -9,8 +9,8 @@ name: Migrate and deploy
 #     outage. A migration failure in CI becomes a red pipeline that deployed
 #     nothing, which is what it actually is.
 #
-# Render's pre-deploy command would be the other option, but it is documented
-# as available on paid instances only.
+# The host is Vercel (it replaced Render, whose free instance slept after 15
+# minutes idle). Vercel has no pre-deploy hook either, so CI stays the place.
 
 # WHY workflow_run AND NOT push
 # -----------------------------
@@ -101,14 +101,24 @@ jobs:
 
       # Only after migrations succeed. Deploying first would put an app version
       # in front of a schema it does not have.
-      - name: Trigger Render deploy
+      #
+      # VERCEL NEVER DEPLOYS ON ITS OWN. `vercel.json` sets
+      # `git.deploymentEnabled: false`, so a push builds nothing; this step is
+      # the only way code reaches production. Vercel's default — deploy every
+      # push — would race CI and this migration job, the same defect the
+      # `workflow_run` trigger above exists to prevent.
+      #
+      # It uploads THIS checkout, i.e. the commit CI verified, and Vercel builds
+      # it with the project's own Production environment variables. Unlike a
+      # deploy hook, which builds whatever the branch tip is by then.
+      - name: Deploy to Vercel
         env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
-            echo "::warning::RENDER_DEPLOY_HOOK is not set — migrations applied, nothing deployed."
-            echo "Expected while the Render service does not exist yet."
-            exit 0
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::VERCEL_TOKEN, VERCEL_ORG_ID and VERCEL_PROJECT_ID must all be set — migrations applied, nothing deployed."
+            exit 1
           fi
-          curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK"
-          echo "Deploy triggered."
+          npx --yes vercel@54.1.0 deploy --prod --yes --token "$VERCEL_TOKEN"
