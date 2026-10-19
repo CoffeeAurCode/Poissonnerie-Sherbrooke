@@ -43,7 +43,13 @@ jobs:
           curl --fail --silent --show-error --max-time 30 "$URL"
           echo "app + database OK"
 
+      # `if: always()` IS THE POINT. Without it a failing app ping skips this
+      # step, and the database goes untouched. That happened on every run from
+      # 2026-08-11 to 2026-10-17 (URL unset, then the app answering 503), and
+      # the project was paused or lost. The two pings are independent on
+      # purpose; the job still goes red if either fails.
       - name: Touch the REST API directly
+        if: always()
         env:
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           ANON: ${{ secrets.SUPABASE_ANON_KEY }}
